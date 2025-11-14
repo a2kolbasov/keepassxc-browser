@@ -1,3 +1,5 @@
+'use strict';
+
 chrome.runtime.onMessage.addListener(({ target, action }, sender, sendResponse) => {
     if (target !== 'offscreen') {
         return;
