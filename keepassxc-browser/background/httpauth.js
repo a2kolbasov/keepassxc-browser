@@ -3,7 +3,6 @@
 const httpAuth = {};
 
 httpAuth.requests = [];
-httpAuth.pendingCallbacks = [];
 
 httpAuth.init = function() {
     let handleReq = httpAuth.handleRequestPromise;
