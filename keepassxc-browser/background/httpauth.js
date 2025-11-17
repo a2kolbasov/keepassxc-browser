@@ -3,6 +3,7 @@
 const httpAuth = {};
 
 /** @typedef {{ credential?: { user: string, password: string } }} RequestAuxData */
+/** @typedef {{ name: string, value: string }} RequestHeader */
 
 /** @type {Map<number, RequestAuxData>} */
 httpAuth.requests = new Map();
@@ -19,8 +20,9 @@ httpAuth.init = function() {
 
     if (browser.webRequest.onAuthRequired.hasListener(handleReq)) {
         browser.webRequest.onAuthRequired.removeListener(handleReq);
+        browser.webRequest.onSendHeaders.removeListener(httpAuth.handleSendRequest);
         browser.webRequest.onCompleted.removeListener(httpAuth.requestCompleted);
-        browser.webRequest.onErrorOccurred.removeListener(httpAuth.requestCompleted);
+        browser.webRequest.onErrorOccurred.removeListener(httpAuth.requestError);
     }
 
     // Only intercept http auth requests if the option is turned on.
@@ -28,14 +30,50 @@ httpAuth.init = function() {
         const opts = { urls: [ '<all_urls>' ] };
 
         browser.webRequest.onAuthRequired.addListener(handleReq, opts, [ reqType ]);
+        browser.webRequest.onSendHeaders.addListener(httpAuth.handleSendRequest, opts, ['requestHeaders']);
         browser.webRequest.onCompleted.addListener(httpAuth.requestCompleted, opts);
-        browser.webRequest.onErrorOccurred.addListener(httpAuth.requestCompleted, opts);
+        browser.webRequest.onErrorOccurred.addListener(httpAuth.requestError, opts);
     }
 };
 
-httpAuth.requestCompleted = function(details) {
+httpAuth.requestError = function(details) {
     httpAuth.requests.delete(details.requestId);
+}
+
+httpAuth.requestCompleted = function(details) {
+    const requestAux = httpAuth.requests.get(details.requestId);
+    if (requestAux === undefined) return;
+    httpAuth.requests.delete(details.requestId);
+
+    if (requestAux.credential) {
+        // TODO ask user about saving
+        console.trace(requestAux.credential);
+    }
 };
+
+httpAuth.handleSendRequest = function(details) {
+    const requestAux = httpAuth.requests.get(details.requestId);
+    if (requestAux === undefined) return;
+
+    /** @type {RequestHeader[]} */
+    const requestHeaders = details.requestHeaders;
+    const headerValue = requestHeaders.find(header => header.name === 'Authorization')?.value;
+    if (!headerValue) return;
+
+    const [scheme, base64Credential] = headerValue.split(' ', 2);
+    if (scheme !== 'Basic') return;
+
+    const decodedCredential = new TextDecoder('UTF-8').decode(
+        Uint8Array.from(atob(base64Credential), c => c.charCodeAt(0))
+    );
+
+    // password can also contain `:`, we need the first one
+    const separatorIndex = decodedCredential.indexOf(':');
+    const user = decodedCredential.slice(0, separatorIndex);
+    const password = decodedCredential.slice(separatorIndex + 1);
+
+    requestAux.credential = { user, password };
+}
 
 httpAuth.handleRequestPromise = function(details) {
     return new Promise((resolve, reject) => {
