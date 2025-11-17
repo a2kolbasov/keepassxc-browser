@@ -2,7 +2,11 @@
 
 const httpAuth = {};
 
-httpAuth.requests = [];
+/** @typedef {{ credential?: { user: string, password: string } }} RequestAuxData */
+
+/** @type {Map<number, RequestAuxData>} */
+httpAuth.requests = new Map();
+
 
 httpAuth.init = function() {
     let handleReq = httpAuth.handleRequestPromise;
@@ -30,10 +34,7 @@ httpAuth.init = function() {
 };
 
 httpAuth.requestCompleted = function(details) {
-    const index = httpAuth.requests.indexOf(details.requestId);
-    if (index >= 0) {
-        httpAuth.requests.splice(index, 1);
-    }
+    httpAuth.requests.delete(details.requestId);
 };
 
 httpAuth.handleRequestPromise = function(details) {
@@ -54,12 +55,12 @@ httpAuth.retrieveCredentials = async function(tabId, url, submitUrl) {
 };
 
 httpAuth.processPendingCallbacks = async function(details, resolve, reject) {
-    if (httpAuth.requests.indexOf(details.requestId) >= 0 || !page.tabs[details.tabId]) {
+    if (httpAuth.requests.has(details.requestId) || !page.tabs[details.tabId]) {
         reject({ cancel: false });
         return;
     }
 
-    httpAuth.requests.push(details.requestId);
+    httpAuth.requests.set(details.requestId, {});
 
     if (details.challenger) {
         // Non-HTTP proxies are possible with PAC scripts, while currently only
