@@ -10,16 +10,16 @@ httpAuth.requests = new Map();
 
 
 httpAuth.init = function() {
-    let handleReq = httpAuth.handleRequestPromise;
-    let reqType = 'blocking';
+    let handleAuthRequest = httpAuth.handleRequestPromise;
+    let authRequestBlockingType = 'blocking';
 
     if (!page.isFirefox) {
-        handleReq = httpAuth.handleRequestCallback;
-        reqType = 'asyncBlocking';
+        handleAuthRequest = httpAuth.handleRequestCallback;
+        authRequestBlockingType = 'asyncBlocking';
     }
 
-    if (browser.webRequest.onAuthRequired.hasListener(handleReq)) {
-        browser.webRequest.onAuthRequired.removeListener(handleReq);
+    if (browser.webRequest.onAuthRequired.hasListener(handleAuthRequest)) {
+        browser.webRequest.onAuthRequired.removeListener(handleAuthRequest);
         browser.webRequest.onSendHeaders.removeListener(httpAuth.handleSendRequest);
         browser.webRequest.onCompleted.removeListener(httpAuth.requestCompleted);
         browser.webRequest.onErrorOccurred.removeListener(httpAuth.requestError);
@@ -29,7 +29,7 @@ httpAuth.init = function() {
     if (page.settings.autoFillAndSend) {
         const opts = { urls: [ '<all_urls>' ] };
 
-        browser.webRequest.onAuthRequired.addListener(handleReq, opts, [ reqType ]);
+        browser.webRequest.onAuthRequired.addListener(handleAuthRequest, opts, [ authRequestBlockingType ]);
         browser.webRequest.onSendHeaders.addListener(httpAuth.handleSendRequest, opts, ['requestHeaders']);
         browser.webRequest.onCompleted.addListener(httpAuth.requestCompleted, opts);
         browser.webRequest.onErrorOccurred.addListener(httpAuth.requestError, opts);
