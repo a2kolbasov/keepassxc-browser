@@ -103,11 +103,20 @@ kpxcForm.getFormSubmitButton = function(form) {
     return undefined;
 };
 
-// Retrieve new password from a form with three elements: Current, New, Repeat New
+/**
+ * Retrieve new password from a form with three elements: Current, New, Repeat New
+ * @param {HTMLInputElement[]} passwordInputs
+ * @returns {string} new password or empty string if not found
+ */
 kpxcForm.getNewPassword = function(passwordInputs = []) {
     if (passwordInputs.length < 2) {
         logDebug('Error: Not enough input fields to detect possible new password.');
         return '';
+    }
+
+    const autocompleteField = passwordInputs.find(field => field.autocomplete === 'new-password');
+    if (autocompleteField?.value) {
+        return autocompleteField.value;
     }
 
     // Just two password fields, current and new
