@@ -5,6 +5,9 @@ const PASSKEYS_CREDENTIAL_IS_EXCLUDED = 21;
 const PASSKEYS_REQUEST_CANCELED = 22;
 const PASSKEYS_WAIT_FOR_LIFETIMER = 30;
 
+/** @type {Function?} */
+let passkeysLifetimeTimerAbort = null;
+
 // Apply a script to the page for intercepting Passkeys (WebAuthn) requests
 const enablePasskeys = async function() {
     const passkeysLogDebug = function(message, extra) {
@@ -57,6 +60,7 @@ const enablePasskeys = async function() {
 
     const sendResponse = async function(command, publicKey) {
         const lifetimeTimer = startTimer(publicKey?.timeout);
+        passkeysLifetimeTimerAbort = lifetimeTimer.abort;
 
         let ret = await chrome.runtime.sendMessage({ action: command, args: [publicKey, window.location.origin] });
         passkeysLogDebug('Passkey response', ret);
@@ -75,13 +79,19 @@ const enablePasskeys = async function() {
             kpxcUI.createNotification('error', errorMessage);
 
             if (!kpxcPasskeysUtils.passkeysFallback && letTimerRunOut(ret.response.errorCode)) {
-                await lifetimeTimer.promise;
+                try {
+                    await lifetimeTimer.promise;
+                } catch {
+                    kpxcPasskeysUtils.sendPasskeysResponse(null, 'abort', null);
+                    return;
+                }
             }
         }
 
         kpxcPasskeysUtils.sendPasskeysResponse(ret.response, ret.response?.errorCode, errorMessage);
         lifetimeTimer.promise.catch(() => { }); // prevent error in console
         lifetimeTimer.abort();
+        passkeysLifetimeTimerAbort = null;
     };
 
     const isSameOriginWithAncestors = function () {
@@ -112,6 +122,9 @@ const enablePasskeys = async function() {
             );
             passkeysLogDebug('Passkey request', publicKey);
             await sendResponse('passkeys_get', publicKey);
+        } else if (ev.detail.action === 'abort') {
+            passkeysLifetimeTimerAbort?.();
+            passkeysLifetimeTimerAbort = null;
         }
     });
 };
