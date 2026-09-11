@@ -5,6 +5,9 @@ keepassClient.keySize = 24;
 keepassClient.messageTimeout = 500; // Milliseconds
 keepassClient.nativeHostName = 'org.keepassxc.keepassxc_browser';
 keepassClient.nativePort = null;
+keepassClient.webSocket = null;
+
+const WEBSOCKET_PORT = 7580;
 
 const kpErrors = {
     UNKNOWN_ERROR: 0,
@@ -41,6 +44,10 @@ const kpErrors = {
     PASSKEYS_UNKNOWN_ERROR: 31,
     PASSKEYS_INVALID_CHALLENGE: 32,
     PASSKEYS_INVALID_USER_ID: 33,
+    CANNOT_USE_REFERENCES: 34,
+    PASSKEYS_EVAL_BY_CREDENTIAL_NOT_SUPPORTED: 35,
+    PASSKEYS_EVAL_BY_CREDENTIAL_NOT_EMPTY: 36,
+    PASSKEYS_EVAL_BY_CREDENTIAL_NOT_FOUND: 37,
 
     errorMessages: {
         0: { msg: tr('errorMessageUnknown') },
@@ -77,6 +84,10 @@ const kpErrors = {
         31: { msg: tr('errorMessagePasskeysUnknownError') },
         32: { msg: tr('errorMessagePasskeysInvalidChallenge') },
         33: { msg: tr('errorMessagePasskeysInvalidUserId') },
+        34: { msg: tr('errorMessageCannotUseReferences') },
+        35: { msg: tr('errorMessagePasskeysEvalByCredentialNotSupported') },
+        36: { msg: tr('errorMessagePasskeysEvalByCredentialNotEmpty') },
+        37: { msg: tr('errorMessagePasskeysEvalByCredentialNotFound') }
     },
 
     getError(errorCode) {
@@ -157,7 +168,10 @@ class Message {
 //--------------------------------------------------------------------------
 
 keepassClient.sendNativeMessage = async function(request, enableTimeout = false, timeoutValue) {
-    if (!keepassClient.nativePort) {
+    if (page?.settings?.connectionMethod === ConnectionMethod.WEBSOCKET && !keepassClient.webSocket) {
+        logError('No WebSocket defined.');
+        return;
+    } else if (page?.settings?.connectionMethod === ConnectionMethod.NATIVE_MESSAGING && !keepassClient.nativePort) {
         logError('No native messaging port defined.');
         return;
     }
@@ -167,7 +181,11 @@ keepassClient.sendNativeMessage = async function(request, enableTimeout = false,
         messageBuffer.addMessage(message);
     });
 
-    keepassClient.nativePort.postMessage(request);
+    if (page?.settings?.connectionMethod === ConnectionMethod.WEBSOCKET) {
+        keepassClient.webSocket.send(JSON.stringify(request));
+    } else {
+        keepassClient.nativePort.postMessage(request);
+    }
 
     const response = await message.promise;
 
@@ -412,4 +430,43 @@ keepassClient.onNativeMessage = function(response) {
 
     // Generic response handling
     keepassClient.handleNativeMessage(response);
+};
+
+//--------------------------------------------------------------------------
+// WebSocket related
+//--------------------------------------------------------------------------
+
+keepassClient.connectToWebSocket = async function() {
+    return new Promise((resolve, reject) => {
+        if (keepassClient.webSocket) {
+            keepassClient.webSocket.close();
+        }
+    
+        console.log(`${EXTENSION_NAME}: Connecting to WebSocket`);
+    
+        try {
+            keepassClient.webSocket = new WebSocket(`ws://localhost:${WEBSOCKET_PORT}`);
+            keepassClient.webSocket.addEventListener('close', (event) => {
+                logError('Close WebSocket:', event);
+                onDisconnected();
+                reject();
+            });
+            keepassClient.webSocket.addEventListener('error', (event) => {
+                logError('WebSocket error:', event);
+                onDisconnected();
+                reject();
+            });
+            keepassClient.webSocket.addEventListener('message', (event) => {
+                keepassClient.onNativeMessage(JSON.parse(event?.data));
+            });
+            keepassClient.webSocket.addEventListener('open', (event) => {
+                console.log(`${EXTENSION_NAME}: WebSocket connected`);
+                keepass.isConnected = true;
+                resolve();
+            });
+        } catch (_e) {
+            keepassClient.webSocket = null;
+            onDisconnected();
+        }
+    });
 };

@@ -1,14 +1,25 @@
 'use strict';
 
+const PASSKEYS_CREATE = 'create';
+const PASSKEYS_GET = 'get';
+
 const PASSKEYS_NO_LOGINS_FOUND = 15;
 const PASSKEYS_CREDENTIAL_IS_EXCLUDED = 21;
+const PASSKEYS_REQUEST_CANCELED = 22;
 const PASSKEYS_WAIT_FOR_LIFETIMER = 30;
+
+/** @type {Function?} */
+let passkeysLifetimeTimerAbortFunc = null;
 
 // Apply a script to the page for intercepting Passkeys (WebAuthn) requests
 const enablePasskeys = async function() {
     const passkeysLogDebug = function(message, extra) {
         if (kpxcPasskeysUtils.debugLogging) {
-            debugLogMessage(message, extra);
+            if (typeof debugLogMessage === 'function') {
+                debugLogMessage(message, extra);
+            } else {
+                console.debug(message, extra);
+            }
         }
     };
 
@@ -17,54 +28,96 @@ const enablePasskeys = async function() {
     document.documentElement.appendChild(passkeys);
     passkeys.remove();
 
-    const startTimer = function(timeout) {
-        return setTimeout(() => {
-            throw new DOMException('lifetimeTimer has expired', 'NotAllowedError');
-        }, timeout);
+    /**
+     * @param {number=} timeout
+     */
+    const startTimer = function (timeout) {
+        let resolve, reject;
+        /** @type {Promise<void>} */
+        const promise = new Promise((_resolve, _reject) => {
+            resolve = _resolve;
+            reject = _reject;
+        });
+
+        const timerId = setTimeout(resolve, timeout);
+
+        return {
+            promise,
+            abort() {
+                clearTimeout(timerId);
+                reject('the timer has been aborted');
+            }
+        };
     };
 
-    const stopTimer = function(lifetimeTimer) {
-        if (lifetimeTimer) {
-            clearTimeout(lifetimeTimer);
-        }
-    };
-
+    // https://www.w3.org/TR/webauthn-2/#sctn-assertion-privacy
+    // https://www.w3.org/TR/webauthn-2/#sctn-getAssertion:~:text=constructAssertionAlg%20and%20terminate%20this%20algorithm%2E-,Return,details
     const letTimerRunOut = function (errorCode) {
-        return (
-            errorCode === PASSKEYS_WAIT_FOR_LIFETIMER ||
-            errorCode === PASSKEYS_CREDENTIAL_IS_EXCLUDED ||
-            errorCode === PASSKEYS_NO_LOGINS_FOUND
-        );
+        return [
+            PASSKEYS_NO_LOGINS_FOUND,
+            PASSKEYS_CREDENTIAL_IS_EXCLUDED,
+            PASSKEYS_REQUEST_CANCELED,
+            PASSKEYS_WAIT_FOR_LIFETIMER,
+        ].includes(errorCode);
     };
 
-    const sendResponse = async function(command, publicKey, callback) {
+    const sendResponse = async function(command, publicKey) {
         const lifetimeTimer = startTimer(publicKey?.timeout);
+        passkeysLifetimeTimerAbortFunc = lifetimeTimer.abort;
 
         const ret = await chrome.runtime.sendMessage({ action: command, args: [ publicKey, window.location.origin ] });
-        if (ret) {
-            let errorMessage;
-            if (ret.response && ret.response.errorCode) {
-                errorMessage = await chrome.runtime.sendMessage({
-                    action: 'get_error_message',
-                    args: ret.response.errorCode,
-                });
-                kpxcUI.createNotification('error', errorMessage);
+        passkeysLogDebug('Passkey response', ret);
 
-                if (kpxcPasskeysUtils.passkeysFallback) {
-                    kpxcPasskeysUtils.sendPasskeysResponse(undefined, ret.response?.errorCode, errorMessage);
-                } else if (letTimerRunOut(ret?.response?.errorCode)) {
+        // `null` - Any error not related to passkeys (no connection to KPXC, database not opened, unknown error, etc.)
+        const errorCode = ret === null ? PASSKEYS_REQUEST_CANCELED : ret?.response?.errorCode;
+        let errorMessage;
+
+        if (errorCode) {
+            errorMessage = await chrome.runtime.sendMessage({
+                action: 'get_error_message',
+                args: errorCode,
+            });
+            kpxcUI.createNotification('error', errorMessage);
+
+            if (!kpxcPasskeysUtils.passkeysFallback && letTimerRunOut(errorCode)) {
+                try {
+                    await lifetimeTimer.promise;
+                } catch {
+                    kpxcPasskeysUtils.sendPasskeysResponse(null, 'abort', null);
                     return;
                 }
             }
-
-            passkeysLogDebug('Passkey response', ret.response);
-            kpxcPasskeysUtils.sendPasskeysResponse(ret.response, ret.response?.errorCode, errorMessage);
-            stopTimer(lifetimeTimer);
         }
+
+        kpxcPasskeysUtils.sendPasskeysResponse(ret?.response, errorCode, errorMessage);
+        lifetimeTimer.promise.catch(() => { }); // prevent error in console
+        lifetimeTimer.abort();
+        passkeysLifetimeTimerAbortFunc = null;
     };
 
-    const isSameOriginWithAncestors = function () {
+    /**
+     * @param {PASSKEYS_CREATE | PASSKEYS_GET} action
+     * @returns {boolean}
+     */
+    const isAllowedByPolicy = function (action) {
+        // https://www.w3.org/TR/webauthn-2/#sctn-permissions-policy
+        // https://www.w3.org/TR/webauthn-2/#sctn-iframe-guidance
+        const feature = `publickey-credentials-${action}`;
+
+        // https://www.w3.org/TR/permissions-policy/#the-policy-object
+        const policy = document.featurePolicy || document.permissionsPolicy;
+
+        if (
+            action === PASSKEYS_GET && // TODO: WebAuthn 3 will support 'create' as well
+            policy?.features().includes(feature)
+        ) {
+            passkeysLogDebug('Checking Permissions Policy');
+            return policy.allowsFeature(feature);
+        }
+
+        // Fallback to sameOriginWithAncestors
         try {
+            passkeysLogDebug('Checking sameOriginWithAncestors');
             return window.origin === window.top.origin;
         } catch (_err) {
             return false;
@@ -80,17 +133,20 @@ const enablePasskeys = async function() {
         if (ev.detail.action === 'passkeys_create') {
             const publicKey = kpxcPasskeysUtils.buildCredentialCreationOptions(
                 ev.detail.publicKey,
-                isSameOriginWithAncestors(),
+                isAllowedByPolicy(PASSKEYS_CREATE),
             );
             passkeysLogDebug('Passkey request', publicKey);
             await sendResponse('passkeys_register', publicKey);
         } else if (ev.detail.action === 'passkeys_get') {
             const publicKey = kpxcPasskeysUtils.buildCredentialRequestOptions(
                 ev.detail.publicKey,
-                isSameOriginWithAncestors(),
+                isAllowedByPolicy(PASSKEYS_GET),
             );
             passkeysLogDebug('Passkey request', publicKey);
             await sendResponse('passkeys_get', publicKey);
+        } else if (ev.detail.action === 'abort') {
+            passkeysLifetimeTimerAbortFunc?.();
+            passkeysLifetimeTimerAbortFunc = null;
         }
     });
 };

@@ -8,20 +8,22 @@ browserAction.show = async function(tab, popupData) {
     page.popupData = popupData;
 
     browserActionWrapper.setIcon({
-        path: await browserAction.generateIconName(popupData.iconType)
+        path: await browserAction.generateIconName(popupData.iconType),
+        tabId: tab.id
     });
 
     if (popupData.popup && tab?.id) {
         browserActionWrapper.setPopup({
-            tabId: tab.id,
-            popup: `popups/${popupData.popup}.html`
+            popup: `popups/${popupData.popup}.html`,
+            tabId: tab.id
         });
 
         let badgeText = '';
+        const currentTab = tabs.getTabFromId(tab.id);
         if (popupData.popup === 'popup_login') {
-            badgeText = page.tabs[tab.id]?.loginList?.length;
+            badgeText = currentTab?.loginList.length;
         } else if (popupData.popup === 'popup_httpauth') {
-            badgeText = page.tabs[tab.id]?.loginList?.logins?.length;
+            badgeText = currentTab?.basicAuthLogins?.loginList?.length;
         }
 
         browserAction.setBadgeText(tab?.id, badgeText);
@@ -38,6 +40,11 @@ browserAction.showDefault = async function(tab) {
         logError('Cannot show default popup: ' + err);
     });
 
+    // This should not be possible. Database cannot be open without a hash.
+    if (!keepass.isDatabaseClosed && !keepass.associated.hash) {
+        return;
+    }
+
     if (!response && !keepass.isKeePassXCAvailable) {
         popupData.iconType = 'cross';
     } else if (!keepass.isAssociated() && !keepass.isDatabaseClosed) {
@@ -52,10 +59,11 @@ browserAction.showDefault = async function(tab) {
         return;
     }
 
-    if (page?.tabs[tab.id]?.loginList.length > 0) {
+    const currentTab = tabs.getTabFromId(tab?.id);
+    if (currentTab?.loginList.length > 0) {
         popupData.iconType = 'normal';
         popupData.popup = 'popup_login';
-        browserAction.setBadgeText(tab?.id, page.tabs[tab.id]?.loginList.length);
+        browserAction.setBadgeText(tab?.id, currentTab?.loginList.length);
     }
 
     await browserAction.show(tab, popupData);

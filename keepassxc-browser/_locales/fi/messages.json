@@ -184,8 +184,8 @@
         "description": "Attestation not supported."
     },
     "errorMessagePasskeysCredentialIsExcluded": {
-        "message": "Tietue on lisätty poikkeuksiin.",
-        "description": "Credential is excluded."
+        "message": "Pääsyavainta ei rekisteröity, koska se on jo olemassa. Poista vanha avain jatkaaksesi.",
+        "description": "Passkey not registered due to an existing credential. Remove the existing credential to continue."
     },
     "errorMessagePasskeysRequestCanceled": {
         "message": "Pääsyavainpyyntö on peruttu.",
@@ -873,6 +873,22 @@
     "optionsCheckboxAutoFillAndSend": {
         "message": "Salli HTTP Basic Auth -tietueiden täyttäminen",
         "description": "Allow filling HTTP Basic Auth credentials checkbox text."
+    },
+    "optionsConnectionMethod": {
+        "message": "Yhteystapa",
+        "description": "Connection method selection text."
+    },
+    "optionsConnectionMethodHelpText": {
+        "message": "Jos native messaging -rajapinta on estetty selaimessasi, voit käyttää suoraa WebSocket-yhteyttä. Toiminnallisuuden täytyy olla aktivoitu myös KeePassXC:n puolella. Selain täytyy käynnistää uudelleen.",
+        "description": "Connection method help text."
+    },
+    "optionsConnectionMethodNativeMessaging": {
+        "message": "Native messaging",
+        "description": "Native messaging option for Connection method."
+    },
+    "optionsConnectionMethodWebSocket": {
+        "message": "WebSocket",
+        "description": "WebSocket option for Connection method."
     },
     "optionsDebugLogging": {
         "message": "Virheenkorjausloki",

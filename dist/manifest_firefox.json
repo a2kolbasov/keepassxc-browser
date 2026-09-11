@@ -1,7 +1,7 @@
 {
     "manifest_version": 2,
     "name": "KeePassXC-Browser",
-    "version": "1.10.0.1",
+    "version": "1.10.3",
     "description": "__MSG_extensionDescription__",
     "author": "KeePassXC Team",
     "icons": {
@@ -41,6 +41,7 @@
             "background/httpauth.js",
             "background/offscreen.js",
             "background/browserAction.js",
+            "background/tabs.js",
             "background/page.js",
             "background/event.js",
             "background/init.js"
@@ -140,6 +141,9 @@
         },
         "reopen_database": {
             "description": "__MSG_popupReopenButton__"
+        },
+        "lock_database": {
+            "description": "__MSG_lockDatabase__"
         },
         "reload_extension": {
             "description": "__MSG_popupReloadButton__"

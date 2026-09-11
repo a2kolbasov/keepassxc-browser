@@ -9,6 +9,7 @@ keepass.featuresList = {
     passkeys: false,
     passkeysDefaultGroup: false,
     requiredKeePassXCVersionFound: false,
+    webSocket: false
 };
 keepass.cacheTimeout = 30 * 1000; // Milliseconds
 keepass.clientID = '';
@@ -64,6 +65,12 @@ keepass.addCredentials = async function(tab, args = []) {
 keepass.updateCredentials = async function(tab, args = []) {
     try {
         const [ entryId, username, password, url, group, groupUuid ] = args;
+
+        if (containsPlaceholder(username) || containsPlaceholder(password)) {
+            logError('References are not allowed in username or password');
+            return CreationError.REFERENCES;
+        }
+
         const taResponse = await keepass.testAssociation(tab);
         if (!taResponse) {
             browserAction.showDefault(tab);
@@ -101,12 +108,12 @@ keepass.updateCredentials = async function(tab, args = []) {
             // KeePassXC versions lower than 2.5.0 will have an empty parsed.error
             let successMessage = response.error;
             if (response.error === 'success' || response.error === '') {
-                successMessage = entryId ? 'updated' : 'created';
+                successMessage = entryId ? CreationError.UPDATED : CreationError.CREATED;
             }
 
             return successMessage;
         } else {
-            return 'error';
+            return CreationError.GENERAL;
         }
     } catch (err) {
         logError(`updateCredentials failed: ${err}`);
@@ -272,7 +279,7 @@ keepass.testAssociation = async function(tab, args = []) {
         }
 
         if (!keepass.serverPublicKey) {
-            if (tab && page.tabs[tab.id]) {
+            if (tab && tabs.getTabFromId(tab.id)) {
                 keepass.handleError(tab, kpErrors.PUBLIC_KEY_NOT_FOUND);
             }
             return false;
@@ -283,7 +290,7 @@ keepass.testAssociation = async function(tab, args = []) {
         const [ dbid, dbkey ] = keepass.getCryptoKey();
 
         if (dbkey === null || dbid === null) {
-            if (tab && page.tabs[tab.id]) {
+            if (tab && tabs.getTabFromId(tab.id)) {
                 keepass.handleError(tab, kpErrors.NO_SAVED_DATABASES_FOUND);
             }
             return false;
@@ -430,7 +437,7 @@ keepass.changePublicKeys = async function(tab, enableTimeout = false, connection
         keepass.updateFeaturesList(response.version);
 
         if (!keepassClient.verifyKeyResponse(response, key, incrementedNonce)) {
-            if (tab && page.tabs[tab.id]) {
+            if (tab && tabs.getTabFromId(tab.id)) {
                 keepass.handleError(tab, kpErrors.KEY_CHANGE_FAILED);
             }
 
@@ -560,7 +567,7 @@ keepass.createNewGroup = async function(tab, args = []) {
 
 keepass.getTotp = async function(tab, args = []) {
     const [ uuid, oldTotp ] = args;
-    if (!keepass.featuresList.newTotpSupported) {
+    if (!keepass.featuresList.newTotp) {
         return oldTotp;
     }
 
@@ -619,7 +626,7 @@ keepass.passkeysRegister = async function(tab, args = []) {
         const taResponse = await keepass.testAssociation(tab, [ false ]);
         if (!taResponse || !keepass.isConnected || args.length < 2) {
             browserAction.showDefault(tab);
-            return [];
+            return null;
         }
 
         const kpAction = kpActions.PASSKEYS_REGISTER;
@@ -643,10 +650,10 @@ keepass.passkeysRegister = async function(tab, args = []) {
         }
 
         browserAction.showDefault(tab);
-        return [];
+        return null;
     } catch (err) {
         logError(`passkeysRegister failed: ${err}`);
-        return [];
+        return null;
     }
 };
 
@@ -655,7 +662,7 @@ keepass.passkeysGet = async function(tab, args = []) {
         const taResponse = await keepass.testAssociation(tab, [ false ]);
         if (!taResponse || !keepass.isConnected || args.length < 2) {
             browserAction.showDefault(tab);
-            return [];
+            return null;
         }
 
         const kpAction = kpActions.PASSKEYS_GET;
@@ -678,10 +685,10 @@ keepass.passkeysGet = async function(tab, args = []) {
         }
 
         browserAction.showDefault(tab);
-        return [];
+        return null;
     } catch (err) {
         logError(`passkeysGet failed: ${err}`);
-        return [];
+        return null;
     }
 };
 
@@ -693,7 +700,7 @@ keepass.migrateKeyRing = function() {
     return new Promise((resolve, reject) => {
         browser.storage.local.get('keyRing').then((item) => {
             const keyring = item.keyRing;
-            // Change dates to numbers, for compatibilty with Chromium based browsers
+            // Change dates to numbers, for compatibility with Chromium based browsers
             if (keyring) {
                 let num = 0;
                 for (const keyHash in keyring) {
@@ -822,7 +829,12 @@ keepass.disableAutomaticReconnect = function() {
 };
 
 keepass.reconnect = async function(tab = null, connectionTimeout = 1500) {
-    keepassClient.connectToNative();
+    if (page?.settings?.connectionMethod === ConnectionMethod.WEBSOCKET) {
+        await keepassClient.connectToWebSocket();
+    } else {
+        keepassClient.connectToNative();
+    }
+
     keepass.generateNewKeyPair();
     const keyChangeResult = await keepass
         .changePublicKeys(tab, !!connectionTimeout, connectionTimeout)
@@ -970,9 +982,7 @@ keepass.getPasskeysRelatedOrigins = async function(rpId) {
 };
 
 keepass.clearErrorMessage = function(tab) {
-    if (tab && page.tabs[tab.id]) {
-        page.tabs[tab.id].errorMessage = undefined;
-    }
+    tabs.updateTabValues(tab?.id, { errorMessage: undefined });
 };
 
 keepass.handleError = function(tab, errorCode, errorMessage = '') {
@@ -981,13 +991,11 @@ keepass.handleError = function(tab, errorCode, errorMessage = '') {
     }
 
     logError(`${errorCode}: ${errorMessage}`);
-    if (tab && page.tabs[tab.id]) {
-        page.tabs[tab.id].errorMessage = errorMessage;
-    }
+    tabs.updateTabValues(tab?.id, { errorMessage: errorMessage });
 };
 
 keepass.updatePopup = function() {
-    if (page && page.tabs.length > 0) {
+    if (page && tabs.tabList.length > 0) {
         browserAction.showDefault();
     }
 };
@@ -1006,18 +1014,25 @@ keepass.updateDatabase = async function() {
 
 keepass.updateDatabaseHashToContent = async function() {
     try {
-        const tab = await getCurrentTab();
-        if (tab?.id) {
-            // Send message to content script
-            browser.tabs.sendMessage(tab.id, {
-                action: 'check_database_hash',
-                hash: { old: keepass.previousDatabaseHash, new: keepass.databaseHash },
-                connected: keepass.isKeePassXCAvailable
-            }).catch((err) => {
-                logError('No content script available for this tab.');
-            });
-            keepass.previousDatabaseHash = keepass.databaseHash;
+        // Get all active tabs from all windows
+        const currentWindowTabs = await browser.tabs.query({ active: true, currentWindow: true, discarded: false });
+        const otherTabs = await browser.tabs.query({ active: true, currentWindow: false, discarded: false });
+        const allTabs = [ ...currentWindowTabs, ...otherTabs ];
+
+        for (const tab of allTabs) {
+            if (tab?.id) {
+                // Send message to content script
+                browser.tabs.sendMessage(tab.id, {
+                    action: 'check_database_hash',
+                    hash: { old: keepass.previousDatabaseHash, new: keepass.databaseHash },
+                    connected: keepass.isKeePassXCAvailable
+                }).catch((err) => {
+                    logError('No content script available for this tab.');
+                });
+            }
         }
+
+        keepass.previousDatabaseHash = keepass.databaseHash;
     } catch (err) {
         logError(`updateDatabaseHashToContent failed: ${err}`);
     }
@@ -1039,6 +1054,7 @@ keepass.updateFeaturesList = function (currentVersion) {
         passkeys: versionResults['2.7.7'],
         passkeysDefaultGroup: versionResults['2.7.10'],
         requiredKeePassXCVersionFound: versionResults[keepass.requiredKeePassXC],
+        webSocket: false // TODO: Enable when released in KeePassXC
     };
 };
 

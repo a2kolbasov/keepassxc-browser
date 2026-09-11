@@ -1,3 +1,29 @@
+1.10.3 (2026-06-01)
+=========================
+- Add support for WebSocket connection method (disabled until KeePassXC support) [#2576]
+- Fix creating Credential Banner [#2984]
+- Fix getting submitted username for Credential Banner [#2985]
+- Fix cloning tab objects [#2986]
+- Fix Atlassian login page [#2989]
+
+1.10.2 (2026-05-29)
+=========================
+- Fix wrapping publicKey to ArrayBuffer with passkeys [#2940]
+- Fix "Credential is excluded" error message (thanks goekce) [#2941]
+- Fix input field detection when label contains overlaying elements (thanks tiboroche) [#2948]
+- Fix sending context menu messages to current frame only [#2951]
+- Fix filling credentials with readonly username field [#2954]
+- Fix passkeys debug logging [#2959]
+- Fix use of old TOTP (thanks jknockel) [#2973]
+- Fix managed settings not applied on Chromium (thanks RGBCube) [#2969]
+- Refactor tab handling [#2944]
+
+1.10.1 (2026-04-03)
+=========================
+- Fix regression when returning Custom Login Fields [#2924]
+- Fix TOTP icon border with Firefox [#2928]
+- Fix loading non-discarded tabs only (thanks tanriol) [#2934]
+
 1.10.0.1 (2026-03-08)
 =========================
 - Remove webRequestBlocking permission from V3 manifests [#2893]

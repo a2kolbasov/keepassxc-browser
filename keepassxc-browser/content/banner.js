@@ -163,8 +163,9 @@ kpxcBanner.create = async function(credentials = {}) {
     this.shadowRoot.append(banner);
     kpxcBanner.wrapper = wrapper;
 
-    if (window.self === window.top && !kpxcBanner.created) {
-        window.parent.document.body.appendChild(wrapper);
+    // Always create the banner to the top document. Useful if we are inside an iframe.
+    if (!kpxcBanner.created) {
+        window.top.document.body.appendChild(wrapper);
         kpxcUI.observeWrapper(wrapper);
         kpxcBanner.created = true;
     }
@@ -368,21 +369,23 @@ kpxcBanner.updateCredentials = async function(credentials = {}) {
 };
 
 kpxcBanner.verifyResult = async function(code) {
-    if (code === 'error') {
+    if (code === CreationError.GENERAL) {
         kpxcUI.createNotification('error', tr('rememberErrorCannotSaveCredentials'));
-    } else if (code === 'created') {
+    } else if (code === CreationError.REFERENCES) {
+        kpxcUI.createNotification('error', tr('errorMessageCannotUseReferences'));
+    } else if (code === CreationError.CREATED) {
         kpxcUI.createNotification(
             'success',
             tr('rememberCredentialsSaved', kpxcBanner.credentials.username || tr('rememberEmptyUsername')),
         );
         await kpxc.retrieveCredentials(true); // Forced reload
-    } else if (code === 'updated') {
+    } else if (code === CreationError.UPDATED) {
         kpxcUI.createNotification(
             'success',
             tr('rememberCredentialsUpdated', kpxcBanner.credentials.username || tr('rememberEmptyUsername')),
         );
         await kpxc.retrieveCredentials(true); // Forced reload
-    } else if (code === 'canceled') {
+    } else if (code === CreationError.CANCELED) {
         kpxcUI.createNotification('warning', tr('rememberCredentialsNotSaved'));
     } else {
         kpxcUI.createNotification('error', tr('rememberErrorDatabaseClosed'));

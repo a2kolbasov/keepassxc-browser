@@ -329,7 +329,7 @@ kpxcFields.getIdFromXPath = function(target) {
     return xpath;
 };
 
-// Generate uniqe ID from properties (new method)
+// Generate unique ID from properties (new method)
 kpxcFields.getIdFromProperties = function(target) {
     if (target.name) {
         return `${target.nodeName} ${target.type} ${target.name} ${target.placeholder}`;
@@ -365,7 +365,7 @@ kpxcFields.getElementFromXPathId = function(xpath) {
 
 // Checks if inputs or combinations contain segmented TOTP fields
 kpxcFields.handleSegmentedTOTPFields = function(inputs, combinations) {
-    // Check for multiple segmented TOTP fields when there are no inputs, or combination contains the segemented fields
+    // Check for multiple segmented TOTP fields when there are no inputs, or combination contains the segmented fields
     const segmentedFields = combinations.filter(c => c.totp);
     if (combinations.length === 0
         || segmentedFields.length === DEFAULT_SEGMENTED_TOTP_FIELDS
@@ -503,10 +503,11 @@ kpxcFields.isTopElement = function(elem, rect) {
 
     // Returns the topmost element from point x, height/2
     // If the input has a label as the top element and it's inside the input, allow it.
+    // Also allows if the topmost element is a child of the label (e.g., span inside label).
     const getTopmostElement = (element, x, elementRect) => {
         const topElement = rootNode.elementFromPoint(x, elementRect.top + (elementRect.height / 2));
-        return element?.labels &&
-            element.labels[0] === topElement &&
+        return element?.labels instanceof NodeList &&
+            element.labels[0]?.contains(topElement) &&
             elementsOverlap(elementRect, topElement.getBoundingClientRect())
             ? element
             : topElement;
@@ -574,7 +575,7 @@ kpxcFields.prepareId = function(id) {
 };
 
 /**
- * Returns the first parent element satifying the {@code predicate} mapped by {@code resultFn} or else {@code defaultVal}.
+ * Returns the first parent element satisfying the {@code predicate} mapped by {@code resultFn} or else {@code defaultVal}.
  * @param {HTMLElement} element     The start element (excluded, starting with the parents)
  * @param {function} predicate      Matcher for the element to find, type (HTMLElement) => boolean
  * @param {function} resultFn       Callback function of type (HTMLElement) => {*} called for the first matching element
@@ -647,19 +648,15 @@ kpxcFields.useCustomLoginFields = async function() {
         kpxcTOTPIcons.newIcon(totp, kpxc.databaseState);
     }
 
-    // No values found
-    if (!username && !password && !totp && !submitButton && stringFields?.length === 0) {
-        return [];
-    }
-
     const combinations = [];
     combinations.push({
         username: username,
         password: password,
-        passwordInputs: [ password ],
+        passwordInputs: password ? [ password ] : [],
         totp: totp,
         fields: stringFields,
-        submitButton: submitButton
+        submitButton: submitButton,
+        form: username?.form
     });
 
     return combinations;

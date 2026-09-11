@@ -15,12 +15,8 @@ const checkErrors = function(pkOptions, sameOriginWithAncestors) {
         throw new Error('No publicKey configuration options were provided');
     }
 
-    if (pkOptions.signal && pkOptions.signal.aborted) {
-        throw new DOMException('Abort signalled', DOMException.AbortError);
-    }
-
     if (!sameOriginWithAncestors) {
-        throw new DOMException('Cross-origin register or authentication is not allowed.', DOMException.NotAllowedError);
+        throw new DOMException('Cross-origin register or authentication is not allowed.', 'NotAllowedError');
     }
 
     if (pkOptions.challenge.byteLength < 16) {
@@ -62,6 +58,11 @@ kpxcPasskeysUtils.buildCredentialCreationOptions = function(pkOptions, sameOrigi
         publicKey.authenticatorSelection = pkOptions?.authenticatorSelection;
         publicKey.challenge = kpxcArrayBufferToBase64(pkOptions.challenge);
         publicKey.extensions = pkOptions?.extensions;
+
+        const prfSalt = publicKey?.extensions?.prf?.eval?.first;
+        if (prfSalt) {
+            publicKey.extensions.prf.eval.first = kpxcArrayBufferToBase64(prfSalt);
+        }
 
         // Make sure integers are used for "alg". Set to reserved if not found.
         // https://www.iana.org/assignments/cose/cose.xhtml#algorithms
@@ -112,6 +113,11 @@ kpxcPasskeysUtils.buildCredentialRequestOptions = function(pkOptions, sameOrigin
         publicKey.rpId = pkOptions?.rpId;
         publicKey.timeout = getTimeout(publicKey?.userVerification, pkOptions?.timeout);
         publicKey.userVerification = pkOptions?.userVerification;
+
+        const prfSalt = publicKey?.extensions?.prf?.eval?.first;
+        if (prfSalt) {
+            publicKey.extensions.prf.eval.first = kpxcArrayBufferToBase64(prfSalt);
+        }
 
         publicKey.allowCredentials = [];
         if (pkOptions.allowCredentials && pkOptions.allowCredentials.length > 0) {

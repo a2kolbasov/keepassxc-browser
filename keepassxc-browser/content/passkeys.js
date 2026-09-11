@@ -1,6 +1,7 @@
 'use strict';
 
 (async () => {
+    const PASSKEYS_NO_LOGINS_FOUND = 15;
     const PASSKEYS_ATTESTATION_NOT_SUPPORTED = 20;
     const PASSKEYS_CREDENTIAL_IS_EXCLUDED = 21;
     const PASSKEYS_REQUEST_CANCELED = 22;
@@ -15,6 +16,9 @@
     const PASSKEYS_UNKNOWN_ERROR = 31;
     const PASSKEYS_INVALID_CHALLENGE = 32;
     const PASSKEYS_INVALID_USER_ID = 33;
+    const PASSKEYS_EVAL_BY_CREDENTIAL_NOT_SUPPORTED = 34;
+    const PASSKEYS_EVAL_BY_CREDENTIAL_NOT_EMPTY = 35;
+    const PASSKEYS_EVAL_BY_CREDENTIAL_NOT_FOUND = 36;
 
     const kpxcStringToArrayBuffer = function(str) {
         const arr = Uint8Array.from(str, c => c.charCodeAt(0));
@@ -77,10 +81,22 @@
             attestationObject: kpxcBase64ToArrayBuffer(publicKey.response.attestationObject),
             clientDataJSON: kpxcBase64ToArrayBuffer(publicKey.response.clientDataJSON),
             getAuthenticatorData: () => kpxcBase64ToArrayBuffer(publicKey.response?.authenticatorData),
-            getPublicKey: () => publicKey.response?.publicKey ? publicKey.response?.publicKey : null,
+            getPublicKey: () =>
+                publicKey.response?.publicKey ? kpxcBase64ToArrayBuffer(publicKey.response?.publicKey) : null,
             getPublicKeyAlgorithm: () => publicKey.response?.publicKeyAlgorithm,
             getTransports: () => [ 'internal' ]
         };
+
+        const prfResponse = publicKey.response?.clientExtensionResults?.prf;
+        if (prfResponse) {
+            if (prfResponse?.results?.first) {
+                response['clientExtensionResults'] =
+                { prf: { results: { first: kpxcBase64ToArrayBuffer(prfResponse?.results?.first) } } };
+            } else if (prfResponse?.enabled) {
+                response['clientExtensionResults'] = { prf: prfResponse };
+            }
+        }
+
         return Object.setPrototypeOf(response, AuthenticatorAttestationResponse.prototype);
     };
 
@@ -93,6 +109,11 @@
             userHandle: publicKey.response?.userHandle ? kpxcBase64ToArrayBuffer(publicKey.response?.userHandle) : null
         };
 
+        const prfResponse = publicKey.response?.clientExtensionResults?.prf?.results?.first;
+        if (prfResponse) {
+            response['clientExtensionResults'] = { prf: { results: { first: kpxcBase64ToArrayBuffer(prfResponse) } } };
+        }
+
         return Object.setPrototypeOf(response, AuthenticatorAssertionResponse.prototype);
     };
 
@@ -101,35 +122,67 @@
         const authenticatorResponse = publicKey?.response?.attestationObject
             ? createAttestationResponse(publicKey)
             : createAssertionResponse(publicKey);
+        const clientExtensionResults =
+            authenticatorResponse?.clientExtensionResults || publicKey?.response?.clientExtensionResults || {};
         const publicKeyCredential = {
             authenticatorAttachment: publicKey.authenticatorAttachment,
             id: publicKey.id,
             rawId: kpxcBase64ToArrayBuffer(publicKey.id),
             response: authenticatorResponse,
             type: publicKey.type,
-            clientExtensionResults: () => publicKey?.response?.clientExtensionResults || {},
-            getClientExtensionResults: () => publicKey?.response?.clientExtensionResults || {},
+            clientExtensionResults: () => clientExtensionResults,
+            getClientExtensionResults: () => clientExtensionResults,
             toJSON: () => kpxcPublicKeyCredentialJson(publicKeyCredential, publicKey)
         };
 
         return Object.setPrototypeOf(publicKeyCredential, PublicKeyCredential.prototype);
     };
 
-    // Posts a message to extension's content script and waits for response
-    const postMessageToExtension = function(request) {
+    /**
+     * Posts a message to extension's content script and waits for response
+     * @async
+     * @param {object} request
+     * @param {AbortSignal=} signal
+     * @returns {Promise<object>}
+     * @throws {unknown} if `AbortSignal`
+     */
+    const postMessageToExtension = function(request, signal) {
         return new Promise((resolve, reject) => {
             const ev = document;
+
+            function abort() {
+                // TODO: Use reject(signal?.reason) with WebAuthn 3
+                reject(new DOMException(signal?.reason?.message || 'AbortError', 'AbortError'));
+            }
 
             const listener = ((messageEvent) => {
                 const handler = (msg) => {
                     if (msg && msg.type === 'kpxc-passkeys-response' && msg.detail) {
                         messageEvent.removeEventListener('kpxc-passkeys-response', listener);
+
+                        if (msg.detail.errorCode === 'abort') {
+                            return abort();
+                        }
                         resolve(msg.detail);
                         return;
                     }
                 };
                 return handler;
             })(ev);
+
+            if (signal instanceof AbortSignal) {
+                if (signal?.aborted) {
+                    return abort();
+                }
+
+                signal.addEventListener('abort', () => {
+                    // Send a request to abort the lifetimer
+                    document.dispatchEvent(new CustomEvent('kpxc-passkeys-request', { detail: {
+                        action: 'abort',
+                    } }));
+                }, { once: true });
+            }
+
             ev.addEventListener('kpxc-passkeys-response', listener);
 
             // Send the request
@@ -137,24 +190,54 @@
         });
     };
 
-    // Throws errors to a correct exceptions
+    /**
+     * @returns {Promise<void>}
+     */
+    const waitForFocus = function () {
+        /*
+        Some browsers (Firefox, Safari) reject requests to original `navigator.credentials.create/get` if the page
+        is out of focus (when the user selects a passkey in KeePassXC-desktop).
+
+        See <https://www.w3.org/TR/webauthn-2/#sctn-abortoperation:~:text=The%20visibility,aborted>
+
+        `document.visibilityState` is not suitable: if the page is visible, but the focus is on another application
+        (or DevTools), the request will be rejected.
+        */
+        return new Promise((resolve) => {
+            if (document.hasFocus()) {
+                return resolve();
+            }
+            document.addEventListener(
+                'focus',
+                () => resolve(),
+                { capture: true, passive: true, once: true }
+            );
+        });
+    };
+
+    /**
+     * Throws errors to a correct exceptions
+     * @param {number} errorCode
+     * @param {string} errorMessage
+     * @returns {never}
+     */
     const throwError = function(errorCode, errorMessage) {
-        if ((!errorCode && !errorMessage) || errorCode === PASSKEYS_REQUEST_CANCELED) {
-            // No error or canceled by user. Stop the timer but throw no exception. Fallback with be called instead.
-            return;
-        }
-
-        if (errorCode === PASSKEYS_WAIT_FOR_LIFETIMER || errorCode === PASSKEYS_CREDENTIAL_IS_EXCLUDED) {
-            // Timer handled in the content script
-            return;
-        }
-
         if ([ PASSKEYS_DOMAIN_RPID_MISMATCH, PASSKEYS_DOMAIN_IS_NOT_VALID ].includes(errorCode)) {
             throw new DOMException(errorMessage, DOMException.SECURITY_ERR);
         }
 
-        if (errorCode === PASSKEYS_NO_SUPPORTED_ALGORITHMS) {
+        if (
+            [
+                PASSKEYS_NO_SUPPORTED_ALGORITHMS,
+                PASSKEYS_EVAL_BY_CREDENTIAL_NOT_SUPPORTED,
+                PASSKEYS_EVAL_BY_CREDENTIAL_NOT_EMPTY
+            ].includes(errorCode)
+        ) {
             throw new DOMException(errorMessage, DOMException.NOT_SUPPORTED_ERR);
+        }
+
+        if (errorCode === PASSKEYS_EVAL_BY_CREDENTIAL_NOT_FOUND) {
+            throw new DOMException(errorMessage, DOMException.SYNTAX_ERR);
         }
 
         if ([ PASSKEYS_INVALID_CHALLENGE, PASSKEYS_INVALID_USER_ID ].includes(errorCode)) {
@@ -163,6 +246,10 @@
 
         if (
             [
+                PASSKEYS_NO_LOGINS_FOUND,
+                PASSKEYS_CREDENTIAL_IS_EXCLUDED,
+                PASSKEYS_REQUEST_CANCELED,
+                PASSKEYS_WAIT_FOR_LIFETIMER,
                 PASSKEYS_ATTESTATION_NOT_SUPPORTED,
                 PASSKEYS_INVALID_URL_PROVIDED,
                 PASSKEYS_INVALID_USER_VERIFICATION,
@@ -182,26 +269,27 @@
     /** @type {typeof originalCredentials} */
     const passkeysCredentials = {
         async create(options) {
-            if (!options.publicKey) {
+            if (!options?.publicKey) {
                 return null;
             }
 
             const response = await postMessageToExtension({
                 action: 'passkeys_create',
-                publicKey: options.publicKey,
-            });
+                publicKey: options.publicKey
+            }, options?.signal);
 
             if (!response.publicKey) {
                 if (!response.fallback) {
                     throwError(response?.errorCode, response?.errorMessage);
                 }
-                return response.fallback ? originalCredentials.create(options) : null;
+                await waitForFocus();
+                return originalCredentials.create(options);
             }
 
             return createPublicKeyCredential(response.publicKey);
         },
         async get(options) {
-            if (!options.publicKey || options?.mediation === 'silent') {
+            if (!options?.publicKey || options?.mediation === 'silent') {
                 return null;
             }
 
@@ -211,14 +299,15 @@
 
             const response = await postMessageToExtension({
                 action: 'passkeys_get',
-                publicKey: options.publicKey,
-            });
+                publicKey: options.publicKey
+            }, options?.signal);
 
             if (!response.publicKey) {
                 if (!response.fallback) {
                     throwError(response?.errorCode, response?.errorMessage);
                 }
-                return response.fallback ? originalCredentials.get(options) : null;
+                await waitForFocus();
+                return originalCredentials.get(options);
             }
 
             return createPublicKeyCredential(response.publicKey);

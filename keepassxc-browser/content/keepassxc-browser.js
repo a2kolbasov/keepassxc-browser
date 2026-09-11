@@ -393,7 +393,7 @@ kpxc.initCredentialFields = async function() {
     }
 };
 
-// Intializes the login lists for popup and Autocomplete Menu
+// Initializes the login lists for popup and Autocomplete Menu
 kpxc.initLoginPopup = function() {
     if (kpxc.credentials.length === 0) {
         return;
@@ -612,7 +612,7 @@ kpxc.rememberCredentials = async function(usernameValue, passwordValue, urlValue
     return true;
 };
 
-// Save credentials triggered fron the context menu
+// Save credentials triggered from the context menu
 kpxc.rememberCredentialsFromContextMenu = async function() {
     if (kpxc.databaseState === DatabaseState.LOCKED) {
         kpxcUI.createNotification('error', tr('rememberErrorDatabaseClosed'));
@@ -653,7 +653,7 @@ kpxc.retrieveCredentials = async function(force = false) {
     }
 
     kpxc.url = document.location.href;
-    
+
     // Search for first combination that has username or password input set
     const firstCombination = kpxc.combinations?.find((combination) => combination?.username || combination?.password);
     kpxc.submitUrl = kpxc.getFormActionUrl(firstCombination);
@@ -967,6 +967,8 @@ browser.runtime.onMessage.addListener(async function(req, sender) {
                 'get_status',
                 [ false, true ] // Set forcePopup to true
             );
+        } else if (req.action === 'lock_database') {
+            await sendMessage('lock_database');
         } else if (req.action === 'save_credentials') {
             kpxc.rememberCredentialsFromContextMenu();
         } else if (req.action === 'retrieve_credentials_forced') {

@@ -1,6 +1,6 @@
 {
     "extensionDescription": {
-        "message": "Integracja KeePassXC z nowoczesnymi przeglądarkami internetowymi",
+        "message": "Integracja KeePassXC z nowoczesnymi przeglądarkami internetowymi",
         "description": "Name of the extension."
     },
     "addSitePreferenceButtonTitle": {
@@ -184,8 +184,8 @@
         "description": "Attestation not supported."
     },
     "errorMessagePasskeysCredentialIsExcluded": {
-        "message": "Dane uwierzytelniające są wyłączone.",
-        "description": "Credential is excluded."
+        "message": "Klucz dostępu nie został zarejestrowany z powodu istniejących danych uwierzytelniających. Usuń istniejące dane uwierzytelniające, aby kontynuować.",
+        "description": "Passkey not registered due to an existing credential. Remove the existing credential to continue."
     },
     "errorMessagePasskeysRequestCanceled": {
         "message": "Żądanie kluczy dostępu zostało anulowane.",
@@ -873,6 +873,22 @@
     "optionsCheckboxAutoFillAndSend": {
         "message": "Zezwalaj na wypełnianie danych uwierzytelniających podstawowego uwierzytelniania HTTP",
         "description": "Allow filling HTTP Basic Auth credentials checkbox text."
+    },
+    "optionsConnectionMethod": {
+        "message": "Metoda połączenia",
+        "description": "Connection method selection text."
+    },
+    "optionsConnectionMethodHelpText": {
+        "message": "Jeśli komunikacja natywana jest zablokowana w przeglądarce, możesz przełączyć się na bezpośrednie połączenie WebSocket. Aby funkcja działała, musi być włączona po stronie KeePassXC. Wymagane jest ponowne uruchomienie przeglądarki.",
+        "description": "Connection method help text."
+    },
+    "optionsConnectionMethodNativeMessaging": {
+        "message": "Komunikacja natywna",
+        "description": "Native messaging option for Connection method."
+    },
+    "optionsConnectionMethodWebSocket": {
+        "message": "WebSocket",
+        "description": "WebSocket option for Connection method."
     },
     "optionsDebugLogging": {
         "message": "Rejestrowanie debugowania",
